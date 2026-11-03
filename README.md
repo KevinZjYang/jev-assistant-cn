@@ -1,155 +1,75 @@
-<div align="center">
-
-<img src=".github/assets/images/logo.png" width="96" alt="Jev 聊天助手" />
-
 # Jev 聊天助手 · 国内版（Android）
 
-[原项目（上游）](https://github.com/jev-chat/jev-chat-jarvis) · [下载 v1.9.2 APK](https://github.com/KevinZjYang/jev-assistant-cn/releases/tag/v1.9.2-cn) · [更新日志](cn/CHANGELOG.md) · [隐私政策](cn/PRIVACY.md)
+把微信聊天截图分享进来、或者粘贴一段聊天文字，它给出 3 条候选回复，点一下复制到剪贴板，你自己粘贴发送。
 
-**简体中文** · [English](cn/README.en.md)
+不读屏、不后台截屏、不自动发送，不需要 root，不修改微信。
 
-</div>
+上游项目：[jev-chat/jev-chat-jarvis](https://github.com/jev-chat/jev-chat-jarvis)（MIT）。本仓库是它的国内化分支，改动见下面两节。
 
-> 本项目是 [jev-chat/jev-chat-jarvis](https://github.com/jev-chat/jev-chat-jarvis)（MIT）的国内化分支：
-> 输入方式从「App 读屏」改成「你主动分享截图 / 粘贴文字」，接口默认指向 DeepSeek。
-> 上游的完整能力、原理与协议说明请看原项目。
+## 用法
 
-## 截图
+1. 从 [Releases](https://github.com/KevinZjYang/jev-assistant-cn/releases) 下载 `jev-assistant-1.9.2-cn.apk`（Android 11+，arm64-v8a）。
+2. 打开 App →「设置」→「模型接口」，填 `https://api.deepseek.com`、`deepseek-flash`、你的密钥，三个按钮（测试判断 / 测试回复 / 测试看图）各点一次确认通。
+3. 微信里长按截图 →「分享」→ 选「Jev助手」；或者先复制文字，再点首页「分享截图 / 粘贴文字」。
+4. 看候选 → 点一条复制 → 回微信长按输入框粘贴 → 自己按发送。
 
-<table align="center">
-<tr>
-<td align="center"><img src=".github/assets/images/cn-home.png" width="280" alt="首页：只有一个主按钮" /><br/><sub>首页：没有权限向导，只有一个「分享截图 / 粘贴文字」</sub></td>
-<td align="center"><img src=".github/assets/images/cn-share.png" width="280" alt="分享截图后的解析结果与候选回复" /><br/><sub>分享截图后：认出 4 条消息，给 3 条候选，点一下复制</sub></td>
-<td align="center"><img src=".github/assets/images/cn-settings.png" width="280" alt="设置页：一张模型接口卡" /><br/><sub>设置页：判断 / 回复 / 看图共用一份接口</sub></td>
-</tr>
-</table>
+不需要开无障碍、不需要悬浮窗、不需要自启动。
 
-## 为什么改了输入方式
+## 我们改了什么
 
-微信从 8.0.5x 起把消息文字从无障碍节点里藏了起来，部分账号的聊天页还带上了 `FLAG_SECURE`：
+**输入方式（核心改动）**
 
-- `screencap`、系统截屏键、无障碍 `takeScreenshot`、`MediaProjection`、adb、投屏、录屏——全部拿不到画面，只有一片黑；
-- 这不是本 App 能绕的：所有截图路径都走 SurfaceFlinger 同一层合成，SECURE 窗口根本不进可捕获缓冲区；
-- 上游有同样的记录：[Issue #42](https://github.com/jev-chat/jev-chat-jarvis/issues/42)，最后只有「卸载重装微信」能恢复，上游 v1.4 宣布微信不再支持。
+- 新增 `ShareReceiverActivity`：接收 `ACTION_SEND`（图片 / 文本 / 多图），也作为首页主入口，可带剪贴板内容进来。
+- 新增 `session/`：`ChatSession`（消息 + 摘要 + 是否连续）、`OverlapMerger`（多次分享的重合段对齐）、`SessionStore`（`files/sessions/<会话名>.json`，原子写）。
+- 新增 `capture/ocr/`：`ChatShotParser` 把截图交给本机 ML Kit 中文 OCR，`BubbleGrouper` 把文字行切成气泡。
+- 分边算法：先用**气泡底色**（自己的绿 / 对方的白，中线横向采 9 点）判「我 / 对方」，读不出底色才退回几何（所有气泡的左边缘最小值、右边缘最大值当两条参考列）。上游那套「离哪条屏幕边更近」在长消息上会翻车，已用真实事故坐标写了回归用例。
+- 跨截图连续：两张图重叠的部分自动吃掉；找不到重合会标「与前文可能不连续」，不硬拼成一段假的连续对话。
+- 候选点击：先试 `ACTION_SET_TEXT` 填进输入框（需要无障碍在跑），失败退剪贴板并提示长按粘贴。任何情况下不点发送。
 
-所以这一版把输入从「App 自己看屏幕」换成「你把内容递给它」：
+**接口**
 
-| | 上游 | 本项目 |
-|---|---|---|
-| 输入 | 无障碍读屏 + 悬浮窗卡片 | 分享截图 / 粘贴文字 |
-| 需要的权限 | 无障碍、悬浮窗、自启动 | **无** |
-| 微信 | 读屏不可用 | 分享截图可用（前提是微信本身还能截屏） |
-| 接口 | 判断 / 回复 / 视觉三张卡 | 一张卡，三用途共用 |
-| 自动发送 | 从不 | 从不 |
+- 判断 / 回复 / 看图三张卡合并成一张：Base URL + 密钥 + 模型，填一次。
+- `Prefs` 里 `reply*` / `vision*` 改成「自己没值就跟判断接口」，并加一次性迁移（`prefs_unified_v19`）清掉旧的分开配置。
+- `JudgeClient` 新增 OpenAI 兼容路由：把 state 渲染成提示词，要求模型按固定的 7 键 JSON 回答，再把结果解析回原来的 `Analysis` 结构。
+- 默认值改为 `https://api.deepseek.com` + `deepseek-flash`；视觉不再对 DeepSeek 拒绝（V4.1 Flash 支持看图），`deepseek-v4-pro` 不支持。
+- 三个诊断按钮保留，分别验判断 / 回复 / 看图。
 
-## 为什么用它
+**界面**
 
-- **只在你主动分享时读。** 不后台读屏、不自动截屏、不 hook、不改微信、不读它的数据库。
-- **发送权永远在你手里。** 点候选只是复制（无障碍在跑且输入框已聚焦时直接填进去），发送键永远由你自己点。
-- **它先判断，再写字。** 先把这段话整理成「谁说的、想干什么」的结构交给模型，再起草候选，而不是让模型凭空编一句。
-- **跨截图能接上。** 同一段对话连拍两张，靠「最长重合段」把第二张接在第一张后面；接不上会明说「可能与前文不连续」，不硬拼。
-- **本机 OCR，零上传图片。** 截图用 ML Kit 中文模型在本机识别，不上传、零 token。
-- **接口自己配。** 默认 DeepSeek（`https://api.deepseek.com` + `deepseek-flash`），也可换通义兼容或任意 OpenAI 兼容地址；作者不运营中转服务器。
-- **本机存储可控。** 密钥在 App 私有 SharedPreferences，会话在 `files/sessions/`，「清空本会话」即时删除。
+- 首页只留：一句话说明、一个「分享截图 / 粘贴文字」主按钮、设置入口、版本号；只在没填密钥时插入一张提示卡。
+- 设置只留：模型接口卡、关系描述、候选条数、关于与隐私、保存。
+- 关于文案改成「只在你主动分享时读取」，因为已经不读屏了。
 
-## 快速开始
+**其他**
 
-**1. 装包。** 从 [Releases](https://github.com/KevinZjYang/jev-assistant-cn/releases) 下载 `jev-assistant-1.9.2-cn.apk`（Android 11+，仅 `arm64-v8a`）。
+- 自动截屏 OCR 默认关闭（`screenshot_ocr_enabled=false`）。
+- 打包：包名 `com.jev.probe`、`1.9.2-cn`（versionCode 14）、minSdk 30 / targetSdk 35、仅 `arm64-v8a`、自签证书。
+- README 与截图重写（截图是模拟器 + 假聊天数据，没有真实聊天记录）。
 
-```bash
-adb install -r jev-assistant-1.9.2-cn.apk
-```
+## 我们删掉了什么
 
-**2. 填接口。** 打开 App → 设置 →「模型接口」：Base URL `https://api.deepseek.com`、模型 `deepseek-flash`、填你的 DeepSeek 密钥，三个按钮各点一次确认连通（判断 / 回复 / 看图）。
+**从界面上删掉的（功能入口不存在了）**
 
-**3. 开始用。** 回首页点「分享截图 / 粘贴文字」；或者在微信里长按截图 → 分享 → 选「Jev助手」。看候选 → 点一条复制 → 回微信粘贴 → 自己按发送。
+- 首页的权限向导：无障碍、悬浮窗、自启动 + 省电三张卡；就绪状态卡；助手总开关。
+- 设置里的：会话白名单、对方发消息时自动分析、树读不到正文时用 OCR 兜底、OCR 模式自动分析、记录聊天历史与注入条数、知识库与联系人、清空知识库、自检、外观（悬浮窗不透明度）、开源仓库按钮。
+- 判断接口的预设项：OpenRouter、博查 Jev、TypeSafe 直连、Vercel、OpenCode Zen——现在只留 DeepSeek Flash / V4 Pro / 通义兼容 / 自定义。对应的代码路径仍在，只是不再从界面暴露。
 
-没有第 4 步：**不需要开无障碍、不需要悬浮窗、不需要自启动。**
+**从默认路径上摘掉的（代码在，不启用）**
 
-## 功能
+- 微信的无障碍读屏适配器 `WeChatAdapter`：已从 `ChatCaptureService` 的适配器列表移除，`BLOCKED_PKGS` 恢复拉黑 `com.tencent.mm`。
+- 悬浮窗：`OverlayController` 保留，但首页与设置都没有入口，分享链路不调用它。
+- 无障碍服务本身仍随包安装（`ChatCaptureService`）——只有「点候选直接填进微信输入框」这一条会用到它；不给权限就退化成复制 + 手动粘贴。
 
-### 判断与候选回复
+**没删但也没做的事**
 
-- 判断与起草共用一份接口：`state`（最近消息 + 关系描述）→ 判断 → 起草 3 条口语化候选。
-- 候选点一下：先尝试 `ACTION_SET_TEXT` 写进输入框（需要无障碍），失败退剪贴板并提示长按粘贴。
-- 会话可以手动命名，也可以从截图顶部自动取（避开状态栏文字）。
+- 群聊仍然分不清发言人：没有昵称列，只能靠底色 / 边缘，多人交替说话时可能把两次发言合成一条。
+- 表情包、语音条、引用回复在 OCR 里会变成噪声行；只做了常见噪声过滤，没有结构化识别。
 
-### 跨截图连续会话
+## 为什么不再读屏
 
-- 第二张图的头几条通常与第一张重叠，`OverlapMerger` 找最长重合段（最多 20 条），只追加重合之后的部分。
-- 滚动窗口默认 30 条，更早的内容压成 ≤600 字摘要挂在会话上。
-- 找不到重合 → 标 `anchored=false`，卡片上提示「这段与前文可能不连续」。
+微信 8.0.5x 起把消息文字从无障碍节点里藏了，部分账号的聊天页还带 `FLAG_SECURE`：`screencap`、系统截屏键、无障碍 `takeScreenshot`、`MediaProjection`、adb、投屏、录屏全部拿不到画面。所有截图路径都走 SurfaceFlinger 同一层合成，SECURE 窗口不进可捕获缓冲区，App 侧绕不过去。上游有同样的记录（[Issue #42](https://github.com/jev-chat/jev-chat-jarvis/issues/42)），最终只有卸载重装微信能恢复，上游 v1.4 宣布微信不再支持。
 
-### 分边：谁说的
-
-- 主判据是**气泡底色**：自己的绿、对方的白（深色模式也有明度差）；在气泡中线横向采 9 个点，绿色过半判「我」。
-- 底色读不出（灰底、纯文字截图）才退回几何：所有气泡的左边缘最小值、右边缘最大值当两条参考列，看每条贴哪列。
-- 早期版本用的是「离哪条屏幕边更近」，长消息（接近全宽）会随机翻转，已修，并用真实事故坐标写了回归用例。
-
-### 接口与模型
-
-- 一张卡：`DeepSeek Flash（推荐）/ DeepSeek V4 Pro / 通义兼容 / 自定义`，Base URL、密钥、模型三栏，判断 / 回复 / 看图共用。
-- 端点自动拼 `/chat/completions`，Base URL 填到域名或 `/v1` 都行。
-- `deepseek-flash`（V4.1 Flash）支持看图；`deepseek-v4-pro` 不支持，识别截图时只能走本机 OCR。
-- 老版本单独存过的回复 / 视觉配置会在升级时清一次，改为跟随主接口。
-
-## 常见问题
-
-<details>
-<summary><b>它会替我发消息吗？</b></summary>
-
-不会。点候选只做两件事：尝试填进输入框、或复制到剪贴板。发送键永远由你点，转账 / 红包 / 收款一律不碰。
-
-</details>
-
-<details>
-<summary><b>需要 root 或 Xposed 吗？</b></summary>
-
-不需要，也不用装任何模块。分享流程甚至不需要无障碍权限——只有「点候选直接填进微信输入框」这一步需要。
-
-</details>
-
-<details>
-<summary><b>为什么不能像上游那样自动读屏？</b></summary>
-
-微信把消息文字藏起来了，部分账号的聊天页还开了 `FLAG_SECURE`，读屏和截屏都拿不到内容。要绕过只能 root + LSPosed 去 `FLAG_SECURE`，与「不改微信、不 root」的前提冲突。
-
-</details>
-
-<details>
-<summary><b>我的聊天内容会被上传吗？</b></summary>
-
-触发分析时，当前会话的文字（就是你分享的那张图里认出来的消息）会发到你自己配置的模型接口；图片本身在本机 OCR，不上传。作者不运营中转服务器，收不到任何内容。会话只存在手机私有目录，可一键清空。
-
-</details>
-
-<details>
-<summary><b>为什么我的微信聊天页截不了图，连系统截屏都提示「当前页面不允许截图」？</b></summary>
-
-这是微信侧的 `FLAG_SECURE` 保护状态，不是本 App 造成的。已知的恢复办法是备份聊天记录 → 卸载微信 → 重装；装过读屏类助手后触发的情况，上游 [Issue #42](https://github.com/jev-chat/jev-chat-jarvis/issues/42) 有完整记录。
-
-</details>
-
-<details>
-<summary><b>群聊支持得怎么样？</b></summary>
-
-弱。没有昵称列，只能靠底色 / 边缘分边，多人交替说话时可能把两次发言合成一条。
-
-</details>
-
-## 项目结构
-
-```
-cn/           国内版 Android 工程（Kotlin，传统 View，无 Compose）
-  app/src/main/java/com/jev/probe/
-    ShareReceiverActivity.kt   分享 / 粘贴入口，出候选
-    session/                   会话模型、重叠合并、落盘
-    capture/ocr/               截图解析（ML Kit OCR → 气泡分组 → 分边）
-    jev/                       判断 / 回复 / 视觉客户端
-    core/Prefs.kt              配置（单接口，默认 DeepSeek）
-global/       上游国际版工程，原样保留
-docs/         验收与方案文档
-```
+如果你的微信聊天页已经被保护（截图全黑、系统提示「当前页面不允许截图」），分享这条路暂时没有素材可用；恢复办法是备份聊天记录 → 卸载微信 → 重装。
 
 ## 构建
 
@@ -161,16 +81,17 @@ echo "sdk.dir=/path/to/Android/Sdk" > local.properties
 ./gradlew assembleRelease
 ```
 
-签名从环境变量 `JEV_KEYSTORE_PROPS` 指向的 properties 读取（`storeFile` / `storePassword` / `keyAlias` / `keyPassword`），不设则输出未签名包。想打模拟器测试包可加 `-PjevAbi=x86_64`。
+签名从环境变量 `JEV_KEYSTORE_PROPS` 指向的 properties 读（`storeFile` / `storePassword` / `keyAlias` / `keyPassword`），不设则输出未签名包。打模拟器测试包可加 `-PjevAbi=x86_64`。
 
-单测：`./gradlew testReleaseUnitTest`（45 个用例，覆盖分边、重叠合并、门限与输入写入）。
+单测：`./gradlew testReleaseUnitTest`，45 个用例，覆盖分边、重叠合并、门限与输入写入。
 
-## 致谢与许可
+## 隐私
 
-MIT，见 [LICENSE](LICENSE)、[NOTICE](NOTICE)。
+- 只在你主动分享时读取；不后台读屏、不自动截屏。
+- 图片在本机 OCR，不上传；只有 OCR 出来的文字会发到你自己配置的模型接口。
+- 密钥存在 App 私有 SharedPreferences，日志只打长度；会话存在 `files/sessions/`，卡片上「清空本会话」即时删除。
+- 作者不运营中转服务器，收不到任何内容。
 
-- 上游：[jev-chat/jev-chat-jarvis](https://github.com/jev-chat/jev-chat-jarvis)（Android / macOS / Windows），本项目的协议设计、判断题目集、适配器骨架与文档都来自那里；
-- 上游 WhatsApp 读取规则来自 [@smgonthebeat](https://github.com/smgonthebeat)（#73）；
-- 上游桌面版：[macOS](https://github.com/jev-chat/jev-chat-jarvis-mac) · [Windows](https://github.com/jev-chat/jev-chat-windows)。
+## 许可
 
-本分支的改动同样以 MIT 发布。
+MIT，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。上游版权归 jev-chat/jev-chat-jarvis 作者所有，本分支的改动同样以 MIT 发布。
